@@ -135,9 +135,20 @@ export const localStorageAPI = {
   
   saveVocabulary: (items: VocabularyItem[]) => {
     const allVocabulary = localStorageAPI.getVocabulary();
-    
-    // Add new items to existing vocabulary instead of replacing
-    const newItems = items.filter(item => !allVocabulary.find(v => v.id === item.id));
+    const existingPairs = new Set(
+      allVocabulary.map(v =>
+        `${(v.word || '').toLowerCase().trim()}|${(v.meaning || '').toLowerCase().trim()}`
+      )
+    );
+    const seen = new Set<string>();
+    const newItems = items.filter(item => {
+      const key = `${(item.word || '').toLowerCase().trim()}|${(item.meaning || '').toLowerCase().trim()}`;
+      if (!item.word || !item.meaning) return false;
+      if (existingPairs.has(key)) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return !allVocabulary.find(v => v.id === item.id);
+    });
     const updated = [...allVocabulary, ...newItems];
     localStorage.setItem(STORAGE_KEYS.VOCABULARY, JSON.stringify(updated));
   },

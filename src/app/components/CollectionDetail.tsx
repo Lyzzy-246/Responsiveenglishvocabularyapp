@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useAuth } from '../lib/AuthContext';
 import { collectionsAPI, vocabularyAPI, imagesAPI, quizzesAPI } from '../lib/api';
+import { parseVocabularyFromText } from '../lib/ocrParser';
 import { toast } from 'sonner';
 import { Header } from './Header';
 import { Upload, Plus, Edit2, Trash2, Save, X, Play } from 'lucide-react';
@@ -30,8 +31,19 @@ export function CollectionDetail() {
   const [newItem, setNewItem] = useState({ english: '', vietnamese: '', example: '' });
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [uploadDebug, setUploadDebug] = useState<string[]>([]);
+  const [rawOcrText, setRawOcrText] = useState('');
+  // Set biến này thành 1 để bật mặc định, 0 để tắt mặc định
+  const OCR_DEBUG_DEFAULT = 0 as const;
+  const [ocrDebugEnabled, setOcrDebugEnabled] = useState<boolean>(Boolean(OCR_DEBUG_DEFAULT));
   const navigate = useNavigate();
   const { user } = useAuth();
+
+  const addDebug = (msg: string) => {
+    if (!ocrDebugEnabled) return;
+    setUploadDebug(prev => [...prev, `${new Date().toLocaleTimeString('vi-VN')} ${msg}`]);
+    try { console.debug('[UploadOCR]', msg); } catch {}
+  };
 
   useEffect(() => {
     if (!user) {
@@ -66,24 +78,115 @@ export function CollectionDetail() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setUploadDebug([]);
+    setRawOcrText('');
+    addDebug(`File: ${file.name} (${file.type || 'unknown'}, ${file.size}B)`);
     setUploading(true);
     try {
+      addDebug('Backend upload start');
       const data = await imagesAPI.upload(id!, file);
-      toast.success('Upload thành công!');
-      navigate(`/collections/${id}/extract/${data.image.id}`);
-    } catch (error: any) {
-      // Check if it's a backend unavailable error
-      if (error.message?.includes('fetch') || error.message?.includes('Failed')) {
-        toast.error('Upload ảnh yêu cầu kết nối backend. Vui lòng thêm từ vựng thủ công.');
+      addDebug(`Backend upload ok: imageId=${data?.image?.id || 'unknown'}`);
+      toast.success('Upload thành công! Đang quét và tạo từ vựng...');
+      
+      // Trigger server-side extraction + auto-save
+      addDebug('Backend extract start');
+      const extractRes = await imagesAPI.extract(data.image.id);
+      addDebug(`Backend extract done: savedCount=${extractRes?.savedCount ?? 'n/a'}`);
+      
+      const savedCount = extractRes?.savedCount || 0;
+      if (savedCount > 0) {
+        toast.success(`Đã tạo ${savedCount} từ vựng mới`);
+        // Reload vocabulary list
+        addDebug('Reload vocabulary list');
+        const vocabData = await vocabularyAPI.getByCollection(id!);
+        setVocabulary(vocabData.vocabulary || []);
       } else {
+        addDebug('Backend extract returned 0 items, go to review page');
+        toast.info('Không trích xuất được từ vựng hoặc độ tin cậy thấp. Vui lòng rà soát thủ công.');
+        navigate(`/collections/${id}/extract/${data.image.id}`);
+      }
+    } catch (error: any) {
+      if (error.message?.includes('fetch') || error.message?.includes('Failed')) {
+        try {
+          addDebug(`Backend unavailable: ${error?.message || String(error)}`);
+          addDebug('Client OCR start');
+          const text = await ocrTextFromImage(file);
+          setRawOcrText(text);
+          addDebug(`Client OCR text length: ${text.length}`);
+          const items = parseVocabularyFromText(text);
+          addDebug(`Parsed items: ${items.length}`);
+          const valid = items.filter(it => it.english && it.vietnamese);
+          if (valid.length > 0) {
+            addDebug(`Saving ${valid.length} items`);
+            const saveRes = await vocabularyAPI.save(id!, valid);
+            addDebug(`Saved items: ${(saveRes?.items || []).length}`);
+            setVocabulary([...vocabulary, ...(saveRes.items || [])]);
+            toast.success(`Đã tạo ${valid.length} từ vựng mới (OCR cục bộ)`);
+          } else {
+            addDebug('No valid items after parsing');
+            toast.info('Không trích xuất được từ vựng từ ảnh này. Vui lòng thêm thủ công.');
+          }
+        } catch (fallbackErr: any) {
+          addDebug(`Client OCR failed: ${fallbackErr?.message || String(fallbackErr)}`);
+          toast.error('Upload ảnh yêu cầu kết nối backend. Vui lòng thêm từ vựng thủ công.');
+        }
+      } else {
+        addDebug(`Unexpected error: ${error?.message || String(error)}`);
         toast.error(error.message || 'Upload thất bại');
       }
     } finally {
+      addDebug('Process end');
       setUploading(false);
       // Reset file input
       if (e.target) e.target.value = '';
     }
   };
+
+  const ocrTextFromImage = async (file: File): Promise<string> => {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = String(fr.result);
+      };
+      fr.onerror = reject;
+      fr.readAsDataURL(file);
+    });
+    const maxW = 1200;
+    const scale = Math.min(1, maxW / img.width);
+    const w = Math.round(img.width * scale);
+    const h = Math.round(img.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    const form = new FormData();
+    form.append('apikey', 'helloworld');
+    form.append('language', 'auto');
+    form.append('OCREngine', '2');
+    form.append('base64Image', dataUrl);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      addDebug('Client OCR request → ocr.space');
+      const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form, signal: controller.signal });
+      const json = await res.json();
+      addDebug(`Client OCR status: ${res.status}`);
+      if (json?.IsErroredOnProcessing) {
+        addDebug(`Client OCR error: ${json?.ErrorMessage || 'unknown'}`);
+      }
+      const text = (json?.ParsedResults && json.ParsedResults[0]?.ParsedText) || '';
+      return String(text || '').trim();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  
 
   const handleAddVocabulary = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,6 +289,31 @@ export function CollectionDetail() {
       <Header />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {ocrDebugEnabled && (
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white rounded-lg border p-3">
+              <div className="text-sm font-semibold mb-2 text-gray-700">Văn bản OCR</div>
+              <textarea
+                readOnly
+                value={rawOcrText || ''}
+                rows={12}
+                className="w-full border rounded-md p-2 font-mono text-xs"
+              />
+            </div>
+            <div className="bg-white rounded-lg border p-3">
+              <div className="text-sm font-semibold mb-2 text-gray-700">Debug</div>
+              <div className="text-xs font-mono text-gray-800 max-h-60 overflow-auto">
+                {uploadDebug.length === 0 ? (
+                  <div className="text-gray-500 italic">Chưa có log</div>
+                ) : (
+                  uploadDebug.map((line, idx) => (
+                    <div key={idx}>{line}</div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">{collection.name}</h1>
           <p className="text-gray-600">{collection.description}</p>
