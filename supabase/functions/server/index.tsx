@@ -596,7 +596,7 @@ app.post("/make-server-06e2d339/quizzes/generate", async (c) => {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
     
-    const { collectionId, questionCount = 10 } = await c.req.json();
+    const { collectionId, questionCount = 10, mode = 'en-vi' } = await c.req.json();
     
     const collection = await kv.get(`collection:${collectionId}`);
     if (!collection || collection.userId !== user.id) {
@@ -621,24 +621,41 @@ app.post("/make-server-06e2d339/quizzes/generate", async (c) => {
     
     // Generate questions with wrong answers from same collection
     const questions = selectedVocab.map((vocab, index) => {
-      // Get 3 wrong answers from other vocabulary in collection
-      const wrongAnswers = vocabulary
-        .filter(v => v.id !== vocab.id)
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 3)
-        .map(v => v.vietnamese);
-      
-      // Combine and shuffle all options
-      const options = [vocab.vietnamese, ...wrongAnswers].sort(() => Math.random() - 0.5);
-      
-      return {
-        id: crypto.randomUUID(),
-        order: index,
-        english: vocab.english,
-        correctAnswer: vocab.vietnamese,
-        options,
-        vocabularyId: vocab.id,
-      };
+      let m: 'en-vi' | 'vi-en' = 'en-vi';
+      if (mode === 'vi-en') m = 'vi-en';
+      else if (mode === 'challenge') m = Math.random() < 0.5 ? 'en-vi' : 'vi-en';
+
+      if (m === 'en-vi') {
+        const wrongAnswers = vocabulary
+          .filter(v => v.id !== vocab.id)
+          .sort(() => Math.random() - 0.5)
+          .slice(0, 3)
+          .map(v => v.vietnamese);
+        const options = [vocab.vietnamese, ...wrongAnswers].sort(() => Math.random() - 0.5);
+        return {
+          id: crypto.randomUUID(),
+          order: index,
+          english: vocab.english,
+          correctAnswer: vocab.vietnamese,
+          options,
+          vocabularyId: vocab.id,
+        };
+      } else {
+        const wrongAnswers = vocabulary
+          .filter(v => v.id !== vocab.id)
+          .sort(() => Math.random() - 0.5)
+          .slice(0, 3)
+          .map(v => v.english);
+        const options = [vocab.english, ...wrongAnswers].sort(() => Math.random() - 0.5);
+        return {
+          id: crypto.randomUUID(),
+          order: index,
+          english: vocab.vietnamese, // question text in Vietnamese
+          correctAnswer: vocab.english,
+          options,
+          vocabularyId: vocab.id,
+        };
+      }
     });
     
     const quizId = crypto.randomUUID();
@@ -646,7 +663,11 @@ app.post("/make-server-06e2d339/quizzes/generate", async (c) => {
       id: quizId,
       collectionId,
       userId: user.id,
-      title: `Quiz: ${collection.name}`,
+      title: mode === 'en-vi'
+        ? `Quiz EN → VI: ${collection.name}`
+        : mode === 'vi-en'
+        ? `Quiz VI → EN: ${collection.name}`
+        : `Quiz Challenge: ${collection.name}`,
       questions,
       createdAt: new Date().toISOString(),
     };

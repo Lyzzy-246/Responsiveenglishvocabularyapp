@@ -31,6 +31,7 @@ export function CollectionDetail() {
   const [newItem, setNewItem] = useState({ english: '', vietnamese: '', example: '' });
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [showModeDialog, setShowModeDialog] = useState(false);
   const [uploadDebug, setUploadDebug] = useState<string[]>([]);
   const [rawOcrText, setRawOcrText] = useState('');
   // Set biến này thành 1 để bật mặc định, 0 để tắt mặc định
@@ -240,7 +241,7 @@ export function CollectionDetail() {
     }
   };
 
-  const handleGenerateQuiz = async () => {
+  const handleGenerateQuiz = async (mode: 'en-vi' | 'vi-en' | 'challenge') => {
     if (!id) return;
 
     // Check minimum vocabulary count
@@ -251,7 +252,7 @@ export function CollectionDetail() {
 
     setGenerating(true);
     try {
-      const data = await quizzesAPI.generate(id, 10);
+      const data = await quizzesAPI.generate(id, 10, mode);
       toast.success('Đã tạo quiz!');
       navigate(`/quiz/${data.quiz.id}`);
     } catch (error: any) {
@@ -259,6 +260,7 @@ export function CollectionDetail() {
       toast.error(error.message || 'Tạo quiz thất bại');
     } finally {
       setGenerating(false);
+      setShowModeDialog(false);
     }
   };
 
@@ -341,7 +343,7 @@ export function CollectionDetail() {
           </button>
 
           <button
-            onClick={handleGenerateQuiz}
+            onClick={() => setShowModeDialog(true)}
             disabled={generating || vocabulary.length < 4}
             className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
@@ -468,6 +470,48 @@ export function CollectionDetail() {
       </main>
 
       {/* Add Vocabulary Dialog */}
+      {showModeDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Chọn chế độ Quiz</h2>
+            <div className="grid gap-3">
+              <button
+                disabled={generating}
+                onClick={() => handleGenerateQuiz('en-vi')}
+                className="px-4 py-3 rounded-lg border hover:bg-gray-50 text-left"
+              >
+                <div className="font-semibold">Mode 1: Anh → Việt</div>
+                <div className="text-sm text-gray-600">Câu hỏi tiếng Anh, đáp án tiếng Việt</div>
+              </button>
+              <button
+                disabled={generating}
+                onClick={() => handleGenerateQuiz('vi-en')}
+                className="px-4 py-3 rounded-lg border hover:bg-gray-50 text-left"
+              >
+                <div className="font-semibold">Mode 2: Việt → Anh</div>
+                <div className="text-sm text-gray-600">Câu hỏi tiếng Việt, đáp án tiếng Anh</div>
+              </button>
+              <button
+                disabled={generating}
+                onClick={() => handleGenerateQuiz('challenge')}
+                className="px-4 py-3 rounded-lg border hover:bg-gray-50 text-left"
+              >
+                <div className="font-semibold">Mode 3: Challenge</div>
+                <div className="text-sm text-gray-600">Trộn ngẫu nhiên Anh→Việt và Việt→Anh</div>
+              </button>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setShowModeDialog(false)}
+                disabled={generating}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showAddDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full p-6">
