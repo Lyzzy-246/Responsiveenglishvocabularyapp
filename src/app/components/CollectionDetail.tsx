@@ -252,7 +252,8 @@ export function CollectionDetail() {
 
     setGenerating(true);
     try {
-      const data = await quizzesAPI.generate(id, 10, mode);
+      // Số câu hỏi bằng toàn bộ số từ trong bộ sưu tập
+      const data = await quizzesAPI.generate(id, vocabulary.length, mode);
       toast.success('Đã tạo quiz!');
       navigate(`/quiz/${data.quiz.id}`);
     } catch (error: any) {
