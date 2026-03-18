@@ -37,7 +37,13 @@ export function QuizHistory() {
   const loadHistory = async () => {
     try {
       const data = await attemptsAPI.getHistory();
-      setAttempts(data.attempts || []);
+      const items: Attempt[] = data.attempts || [];
+      const sorted = items.slice().sort((a, b) => {
+        const ta = new Date(a.completedAt || a.createdAt || 0).getTime();
+        const tb = new Date(b.completedAt || b.createdAt || 0).getTime();
+        return tb - ta; // mới nhất lên trên
+      });
+      setAttempts(sorted);
     } catch (error: any) {
       console.error('Load history error:', error);
       toast.error('Không thể tải lịch sử');

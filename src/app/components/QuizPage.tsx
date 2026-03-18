@@ -22,6 +22,14 @@ interface Quiz {
   questions: Question[];
 }
 
+interface DetailedAnswer {
+  questionId: string;
+  english: string;
+  correctAnswer: string;
+  userAnswer: string;
+  isCorrect: boolean;
+}
+
 export function QuizPage() {
   const { id } = useParams<{ id: string }>();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
@@ -31,6 +39,7 @@ export function QuizPage() {
   const [submitting, setSubmitting] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [results, setResults] = useState<{ score: number; correctCount: number; totalQuestions: number } | null>(null);
+  const [detailedAnswers, setDetailedAnswers] = useState<DetailedAnswer[]>([]);
   const navigate = useNavigate();
   const { user } = useAuth();
 
@@ -89,7 +98,7 @@ export function QuizPage() {
     try {
       // Calculate score
       let correctCount = 0;
-      const detailedAnswers = quiz.questions.map(q => {
+      const detailed = quiz.questions.map(q => {
         const isCorrect = answers[q.id] === q.correctAnswer;
         if (isCorrect) correctCount++;
         return {
@@ -103,7 +112,8 @@ export function QuizPage() {
 
       const score = Math.round((correctCount / quiz.questions.length) * 100);
 
-      await attemptsAPI.save(id, detailedAnswers, score, quiz.questions.length);
+      await attemptsAPI.save(id, detailed, score, quiz.questions.length);
+      setDetailedAnswers(detailed);
       
       // Show results modal instead of navigating
       setResults({
@@ -259,7 +269,7 @@ export function QuizPage() {
       {/* Results Modal */}
       {showResults && results && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+          <div className="bg-white rounded-2xl p-8 w-full max-w-2xl mx-4 shadow-2xl">
             <div className="text-center mb-6">
               <div className={`inline-flex items-center justify-center w-20 h-20 rounded-full mb-4 ${ 
                 results.score >= 80 ? 'bg-green-100' : results.score >= 60 ? 'bg-yellow-100' : 'bg-red-100'
@@ -313,6 +323,40 @@ export function QuizPage() {
                 </div>
               </div>
             </div>
+
+            {/* Wrong answers list */}
+            {detailedAnswers.filter(a => !a.isCorrect).length > 0 && (
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-gray-900">Danh sách câu sai</h3>
+                  <span className="text-sm text-gray-500">
+                    {detailedAnswers.filter(a => !a.isCorrect).length} câu
+                  </span>
+                </div>
+                <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
+                  {detailedAnswers.filter(a => !a.isCorrect).map((a, idx) => (
+                    <div key={a.questionId} className="border border-red-100 rounded-lg p-3 bg-red-50/40">
+                      <div className="flex items-start justify-between">
+                        <div className="font-semibold text-gray-900">{idx + 1}. {a.english}</div>
+                        <XCircle className="w-5 h-5 text-red-600 shrink-0" />
+                      </div>
+                      <div className="mt-2 text-sm">
+                        <div className="flex gap-2">
+                          <span className="text-gray-600">Định nghĩa đúng:</span>
+                          <span className="font-medium text-gray-900">{a.correctAnswer}</span>
+                        </div>
+                        {a.userAnswer && (
+                          <div className="flex gap-2">
+                            <span className="text-gray-600">Bạn đã chọn:</span>
+                            <span className="text-red-700">{a.userAnswer}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <button
               onClick={handleCloseResults}

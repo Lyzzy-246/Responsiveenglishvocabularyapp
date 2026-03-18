@@ -168,28 +168,42 @@ export const imagesAPI = {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('collectionId', collectionId);
-    
-    const response = await fetch(`${API_BASE}/images/upload`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-      body: formData,
-    });
-    
-    const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(data.error || 'Upload failed');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+      const response = await fetch(`${API_BASE}/images/upload`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Upload failed');
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
     }
-    
-    return data;
   },
   
   extract: async (imageId: string) => {
-    return apiRequest(`/images/${imageId}/extract`, {
-      method: 'POST',
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      const res = await fetch(`${API_BASE}/images/${imageId}/extract`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${publicAnonKey}`, 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Extract failed');
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
   },
 };
 
@@ -226,16 +240,34 @@ export const vocabularyAPI = {
     } catch (error) {
       console.warn('Backend unavailable, using localStorage fallback');
       backendAvailable = false;
-      const vocabItems = items.map(item => ({
-        id: item.id || crypto.randomUUID(),
-        collectionId,
-        word: item.english || item.word,  // Support both formats
-        meaning: item.vietnamese || item.meaning,  // Support both formats
-        example: item.example || '',
-        imageId: item.imageId,
-        createdAt: item.createdAt || new Date().toISOString(),
-      }));
-      localStorageAPI.saveVocabulary(vocabItems);
+      const existing = localStorageAPI.getVocabularyByCollection(collectionId);
+      const existingSet = new Set(
+        existing.map(v =>
+          `${(v.word || '').toLowerCase().trim()}|${(v.meaning || '').toLowerCase().trim()}`
+        )
+      );
+      const seen = new Set<string>();
+      const vocabItems = items
+        .map(item => ({
+          id: item.id || crypto.randomUUID(),
+          collectionId,
+          word: item.english || item.word,
+          meaning: item.vietnamese || item.meaning,
+          example: item.example || '',
+          imageId: item.imageId,
+          createdAt: item.createdAt || new Date().toISOString(),
+        }))
+        .filter(it => {
+          const key = `${(it.word || '').toLowerCase().trim()}|${(it.meaning || '').toLowerCase().trim()}`;
+          if (!it.word || !it.meaning) return false;
+          if (existingSet.has(key)) return false;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      if (vocabItems.length > 0) {
+        localStorageAPI.saveVocabulary(vocabItems);
+      }
       // Map back to component format
       const resultItems = vocabItems.map(item => ({
         id: item.id,
@@ -294,11 +326,15 @@ export const vocabularyAPI = {
 
 // Quizzes API
 export const quizzesAPI = {
-  generate: async (collectionId: string, questionCount: number = 10) => {
+  generate: async (
+    collectionId: string,
+    questionCount: number = 10,
+    mode: 'en-vi' | 'vi-en' | 'challenge' = 'en-vi'
+  ) => {
     try {
       const data = await apiRequest('/quizzes/generate', {
         method: 'POST',
-        body: JSON.stringify({ collectionId, questionCount }),
+        body: JSON.stringify({ collectionId, questionCount, mode }),
       });
       backendAvailable = true;
       return data;
@@ -316,31 +352,54 @@ export const quizzesAPI = {
       const shuffled = [...vocabulary].sort(() => Math.random() - 0.5);
       const count = Math.min(questionCount, vocabulary.length);
       
-      const questions = shuffled.slice(0, count).map((item, index) => {
-        // Get 3 random wrong answers from other items
+      const baseQuestions = shuffled.slice(0, count).map((item, index) => {
         const otherItems = vocabulary.filter(v => v.id !== item.id);
-        const wrongAnswers = otherItems
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 3)
-          .map(v => v.meaning);
-        
-        // Shuffle all options
-        const options = [item.meaning, ...wrongAnswers].sort(() => Math.random() - 0.5);
-        
-        return {
-          id: `q${index + 1}`,
-          order: index + 1,
-          english: item.word,  // Map word to english for quiz display
-          correctAnswer: item.meaning,
-          options,
-          vocabularyId: item.id,
-        };
+        const q: any = { item, index, otherItems };
+        return q;
+      });
+
+      const questions = baseQuestions.map(({ item, index, otherItems }) => {
+        // Decide mode for this question
+        let m: 'en-vi' | 'vi-en' = 'en-vi';
+        if (mode === 'vi-en') m = 'vi-en';
+        else if (mode === 'challenge') m = Math.random() < 0.5 ? 'en-vi' : 'vi-en';
+
+        if (m === 'en-vi') {
+          const wrongAnswers = otherItems
+            .sort(() => Math.random() - 0.5)
+            .slice(0, 3)
+            .map(v => v.meaning);
+          const options = [item.meaning, ...wrongAnswers].sort(() => Math.random() - 0.5);
+          return {
+            id: `q${index + 1}`,
+            order: index + 1,
+            english: item.word, // question text
+            correctAnswer: item.meaning,
+            options,
+            vocabularyId: item.id,
+          };
+        } else {
+          // vi-en
+          const wrongAnswers = otherItems
+            .sort(() => Math.random() - 0.5)
+            .slice(0, 3)
+            .map(v => v.word);
+          const options = [item.word, ...wrongAnswers].sort(() => Math.random() - 0.5);
+          return {
+            id: `q${index + 1}`,
+            order: index + 1,
+            english: item.meaning, // question text (vietnamese)
+            correctAnswer: item.word,
+            options,
+            vocabularyId: item.id,
+          };
+        }
       });
       
       const quiz = {
         id: crypto.randomUUID(),
         collectionId,
-        title: 'Quiz từ vựng',
+        title: mode === 'en-vi' ? 'Quiz EN → VI' : mode === 'vi-en' ? 'Quiz VI → EN' : 'Quiz Challenge',
         questions,
         createdAt: new Date().toISOString(),
       };
