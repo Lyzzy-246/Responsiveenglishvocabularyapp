@@ -168,28 +168,42 @@ export const imagesAPI = {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('collectionId', collectionId);
-    
-    const response = await fetch(`${API_BASE}/images/upload`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-      body: formData,
-    });
-    
-    const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(data.error || 'Upload failed');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+      const response = await fetch(`${API_BASE}/images/upload`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Upload failed');
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
     }
-    
-    return data;
   },
   
   extract: async (imageId: string) => {
-    return apiRequest(`/images/${imageId}/extract`, {
-      method: 'POST',
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    try {
+      const res = await fetch(`${API_BASE}/images/${imageId}/extract`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${publicAnonKey}`, 'Content-Type': 'application/json' },
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Extract failed');
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
   },
 };
 
@@ -226,16 +240,34 @@ export const vocabularyAPI = {
     } catch (error) {
       console.warn('Backend unavailable, using localStorage fallback');
       backendAvailable = false;
-      const vocabItems = items.map(item => ({
-        id: item.id || crypto.randomUUID(),
-        collectionId,
-        word: item.english || item.word,  // Support both formats
-        meaning: item.vietnamese || item.meaning,  // Support both formats
-        example: item.example || '',
-        imageId: item.imageId,
-        createdAt: item.createdAt || new Date().toISOString(),
-      }));
-      localStorageAPI.saveVocabulary(vocabItems);
+      const existing = localStorageAPI.getVocabularyByCollection(collectionId);
+      const existingSet = new Set(
+        existing.map(v =>
+          `${(v.word || '').toLowerCase().trim()}|${(v.meaning || '').toLowerCase().trim()}`
+        )
+      );
+      const seen = new Set<string>();
+      const vocabItems = items
+        .map(item => ({
+          id: item.id || crypto.randomUUID(),
+          collectionId,
+          word: item.english || item.word,
+          meaning: item.vietnamese || item.meaning,
+          example: item.example || '',
+          imageId: item.imageId,
+          createdAt: item.createdAt || new Date().toISOString(),
+        }))
+        .filter(it => {
+          const key = `${(it.word || '').toLowerCase().trim()}|${(it.meaning || '').toLowerCase().trim()}`;
+          if (!it.word || !it.meaning) return false;
+          if (existingSet.has(key)) return false;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      if (vocabItems.length > 0) {
+        localStorageAPI.saveVocabulary(vocabItems);
+      }
       // Map back to component format
       const resultItems = vocabItems.map(item => ({
         id: item.id,
