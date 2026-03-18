@@ -326,11 +326,15 @@ export const vocabularyAPI = {
 
 // Quizzes API
 export const quizzesAPI = {
-  generate: async (collectionId: string, questionCount: number = 10) => {
+  generate: async (
+    collectionId: string,
+    questionCount: number = 10,
+    mode: 'en-vi' | 'vi-en' | 'challenge' = 'en-vi'
+  ) => {
     try {
       const data = await apiRequest('/quizzes/generate', {
         method: 'POST',
-        body: JSON.stringify({ collectionId, questionCount }),
+        body: JSON.stringify({ collectionId, questionCount, mode }),
       });
       backendAvailable = true;
       return data;
@@ -348,31 +352,54 @@ export const quizzesAPI = {
       const shuffled = [...vocabulary].sort(() => Math.random() - 0.5);
       const count = Math.min(questionCount, vocabulary.length);
       
-      const questions = shuffled.slice(0, count).map((item, index) => {
-        // Get 3 random wrong answers from other items
+      const baseQuestions = shuffled.slice(0, count).map((item, index) => {
         const otherItems = vocabulary.filter(v => v.id !== item.id);
-        const wrongAnswers = otherItems
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 3)
-          .map(v => v.meaning);
-        
-        // Shuffle all options
-        const options = [item.meaning, ...wrongAnswers].sort(() => Math.random() - 0.5);
-        
-        return {
-          id: `q${index + 1}`,
-          order: index + 1,
-          english: item.word,  // Map word to english for quiz display
-          correctAnswer: item.meaning,
-          options,
-          vocabularyId: item.id,
-        };
+        const q: any = { item, index, otherItems };
+        return q;
+      });
+
+      const questions = baseQuestions.map(({ item, index, otherItems }) => {
+        // Decide mode for this question
+        let m: 'en-vi' | 'vi-en' = 'en-vi';
+        if (mode === 'vi-en') m = 'vi-en';
+        else if (mode === 'challenge') m = Math.random() < 0.5 ? 'en-vi' : 'vi-en';
+
+        if (m === 'en-vi') {
+          const wrongAnswers = otherItems
+            .sort(() => Math.random() - 0.5)
+            .slice(0, 3)
+            .map(v => v.meaning);
+          const options = [item.meaning, ...wrongAnswers].sort(() => Math.random() - 0.5);
+          return {
+            id: `q${index + 1}`,
+            order: index + 1,
+            english: item.word, // question text
+            correctAnswer: item.meaning,
+            options,
+            vocabularyId: item.id,
+          };
+        } else {
+          // vi-en
+          const wrongAnswers = otherItems
+            .sort(() => Math.random() - 0.5)
+            .slice(0, 3)
+            .map(v => v.word);
+          const options = [item.word, ...wrongAnswers].sort(() => Math.random() - 0.5);
+          return {
+            id: `q${index + 1}`,
+            order: index + 1,
+            english: item.meaning, // question text (vietnamese)
+            correctAnswer: item.word,
+            options,
+            vocabularyId: item.id,
+          };
+        }
       });
       
       const quiz = {
         id: crypto.randomUUID(),
         collectionId,
-        title: 'Quiz từ vựng',
+        title: mode === 'en-vi' ? 'Quiz EN → VI' : mode === 'vi-en' ? 'Quiz VI → EN' : 'Quiz Challenge',
         questions,
         createdAt: new Date().toISOString(),
       };
