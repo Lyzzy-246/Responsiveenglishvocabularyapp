@@ -27,8 +27,8 @@ app.options('*', (c) => c.text('', 204));
 
 // Initialize Supabase client for auth and storage
 const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  Deno.env.get('SB_URL') ?? Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SB_SERVICE_ROLE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
 );
 
 // Create storage bucket on startup
@@ -57,14 +57,14 @@ async function getAuthUser(authHeader: string | null) {
 }
 
 // Health check endpoint
-app.get("/make-server-06e2d339/health", (c) => {
+app.get("/server/health", (c) => {
   return c.json({ status: "ok" });
 });
 
 // ==================== AUTH ROUTES ====================
 
 // Sign up
-app.post("/make-server-06e2d339/auth/signup", async (c) => {
+app.post("/server/auth/signup", async (c) => {
   try {
     const { email, password, name } = await c.req.json();
     
@@ -101,13 +101,13 @@ app.post("/make-server-06e2d339/auth/signup", async (c) => {
 });
 
 // Sign in
-app.post("/make-server-06e2d339/auth/signin", async (c) => {
+app.post("/server/auth/signin", async (c) => {
   try {
     const { email, password } = await c.req.json();
     
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      Deno.env.get('SB_URL') ?? Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SB_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '',
     );
     
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -132,7 +132,7 @@ app.post("/make-server-06e2d339/auth/signin", async (c) => {
 });
 
 // Get session
-app.get("/make-server-06e2d339/auth/session", async (c) => {
+app.get("/server/auth/session", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) {
@@ -150,13 +150,16 @@ app.get("/make-server-06e2d339/auth/session", async (c) => {
 // ==================== COLLECTIONS ROUTES ====================
 
 // Get all collections for user
-app.get("/make-server-06e2d339/collections", async (c) => {
+app.get("/server/collections", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
     
     const collectionIds = await kv.get(`collections:user:${user.id}`) || [];
-    const collections = await kv.mget(collectionIds.map((id: string) => `collection:${id}`));
+    const keys = collectionIds.map((id: string) =>
+      id.startsWith('collection:') ? id : `collection:${id}`
+    );
+    const collections = await kv.mget(keys);
     
     return c.json({ collections: collections.filter(Boolean) });
   } catch (error) {
@@ -166,7 +169,7 @@ app.get("/make-server-06e2d339/collections", async (c) => {
 });
 
 // Create collection
-app.post("/make-server-06e2d339/collections", async (c) => {
+app.post("/server/collections", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -187,7 +190,7 @@ app.post("/make-server-06e2d339/collections", async (c) => {
     
     // Add to user's collections
     const userCollections = await kv.get(`collections:user:${user.id}`) || [];
-    userCollections.push(`collection:${collectionId}`);
+    userCollections.push(collectionId);
     await kv.set(`collections:user:${user.id}`, userCollections);
     
     // Initialize empty arrays for this collection
@@ -203,7 +206,7 @@ app.post("/make-server-06e2d339/collections", async (c) => {
 });
 
 // Get single collection
-app.get("/make-server-06e2d339/collections/:id", async (c) => {
+app.get("/server/collections/:id", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -222,8 +225,38 @@ app.get("/make-server-06e2d339/collections/:id", async (c) => {
   }
 });
 
+// Update collection
+app.put("/server/collections/:id", async (c) => {
+  try {
+    const user = await getAuthUser(c.req.header('Authorization'));
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const collectionId = c.req.param('id');
+    const collection = await kv.get(`collection:${collectionId}`);
+
+    if (!collection || collection.userId !== user.id) {
+      return c.json({ error: 'Collection not found' }, 404);
+    }
+
+    const updates = await c.req.json();
+    const next = {
+      ...collection,
+      ...(typeof updates?.name === 'string' ? { name: updates.name } : {}),
+      ...(typeof updates?.description === 'string' ? { description: updates.description } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await kv.set(`collection:${collectionId}`, next);
+
+    return c.json({ collection: next });
+  } catch (error) {
+    console.error('Update collection error:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // Delete collection
-app.delete("/make-server-06e2d339/collections/:id", async (c) => {
+app.delete("/server/collections/:id", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -243,7 +276,9 @@ app.delete("/make-server-06e2d339/collections/:id", async (c) => {
     
     // Remove from user's collections
     const userCollections = await kv.get(`collections:user:${user.id}`) || [];
-    const filtered = userCollections.filter((id: string) => id !== `collection:${collectionId}`);
+    const filtered = userCollections.filter((id: string) =>
+      id !== `collection:${collectionId}` && id !== collectionId
+    );
     await kv.set(`collections:user:${user.id}`, filtered);
     
     return c.json({ success: true });
@@ -256,7 +291,7 @@ app.delete("/make-server-06e2d339/collections/:id", async (c) => {
 // ==================== IMAGE ROUTES ====================
 
 // Upload image
-app.post("/make-server-06e2d339/images/upload", async (c) => {
+app.post("/server/images/upload", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -321,7 +356,7 @@ app.post("/make-server-06e2d339/images/upload", async (c) => {
 });
 
 // Mock OCR extraction (in production, integrate with Google Cloud Vision, AWS Textract, etc.)
-app.post("/make-server-06e2d339/images/:id/extract", async (c) => {
+app.post("/server/images/:id/extract", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -333,80 +368,178 @@ app.post("/make-server-06e2d339/images/:id/extract", async (c) => {
       return c.json({ error: 'Image not found' }, 404);
     }
     
-    // Helper: detect Vietnamese diacritics
-    const hasVietnamese = (s: string) => /[ăâđêôơưĂÂĐÊÔƠƯáàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵ]/i.test(s);
+    const hasVietnamese = (s: string) =>
+      /[ăâđêôơưĂÂĐÊÔƠƯáàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵ]/i.test(
+        s,
+      );
+
+    const stripPhonetics = (s: string) => s.replace(/\/[^/]+\/:?/g, "").trim();
+
+    const normalize = (s: string) =>
+      stripPhonetics(
+        s
+          .replace(/\u2014/g, "-")
+          .replace(/[•–—]/g, "-")
+          .replace(/\s+/g, " ")
+          .replace(/^\s*[-:*•]+/, "")
+          .trim(),
+      );
+
     const isLikelyEnglishTerm = (s: string) => {
-      const words = s.trim().split(/\s+/);
-      return words.length > 0 && words.length <= 6 && !hasVietnamese(s);
-    };
-    const isExampleSentence = (s: string) => {
       const t = s.trim();
-      return !hasVietnamese(t) && /[.!?]$/.test(t) && t.split(/\s+/).length >= 4;
+      if (!t) return false;
+      if (hasVietnamese(t)) return false;
+      if (t.length < 2 || t.length > 80) return false;
+      if (!/[aeiou]/i.test(t)) return false;
+      if (/[^A-Za-z\s'\-\/\+]/.test(t)) return false;
+      return true;
     };
-    const normalize = (s: string) => s.replace(/^[\d\)\.\-\*•\s]+/, "").trim();
-    
-    // OCR provider: OCR.space via signed image URL if API key present; otherwise fallback mock
-    let ocrText = "";
-    const ocrKey = Deno.env.get("OCR_SPACE_API_KEY");
-    if (ocrKey && image?.url) {
-      try {
-        const url = new URL("https://api.ocr.space/parse/imageurl");
-        url.searchParams.set("apikey", ocrKey);
-        url.searchParams.set("url", image.url);
-        url.searchParams.set("language", "auto");
-        url.searchParams.set("OCREngine", "2");
-        const res = await fetch(url.toString(), { method: "GET" });
-        const json = await res.json();
-        const parsed = json?.ParsedResults?.[0]?.ParsedText;
-        if (parsed && typeof parsed === "string") {
-          ocrText = parsed;
-        }
-      } catch (e) {
-        console.warn("OCR request failed, using mock extraction:", e);
+
+    const splitInlineByVietnamese = (l: string): [string, string] | null => {
+      const idx = [...l].findIndex((ch) => hasVietnamese(ch));
+      if (idx <= 0) return null;
+      const left = l.slice(0, idx).trim().replace(/[,\-:]+$/, "").trim();
+      const right = l.slice(idx).trim().replace(/^[:\-,\s]+/, "").trim();
+      if (!left || !right) return null;
+      if (!isLikelyEnglishTerm(left)) return null;
+      return [left, right];
+    };
+
+    const fixVietnameseArtifacts = (vi: string): string => {
+      let s = vi;
+      const VN_VOWEL =
+        "[aeiouyăâêôơưáàảãạắằẳẵặấầẩẫậéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]";
+      const CONS_CLUSTER = "(?:ngh|ng|nh|th|tr|ch|gh|gi|kh|ph|qu|b|c|d|đ|g|h|k|l|m|n|p|q|r|s|t|v|x)";
+      s = s.replace(new RegExp(`\\b(${CONS_CLUSTER})\\s+(${VN_VOWEL})`, "gi"), (_m, a, b) => `${a}${b}`);
+      s = s.replace(/([ạảãáàâăêôơưéèẻẽẹíìỉĩịóòỏõọúùủũụýỳỷỹỵa-zđ]+)mẹ/gi, "$1 mẹ");
+      s = s.replace(/\s{2,}/g, " ").replace(/\s+,/g, ",").replace(/\s+\/\s+/g, "/").trim();
+      return s;
+    };
+
+    const removeTrailingEnglishTail = (vi: string): string => {
+      const WHITELIST = new Set(["em", "anh", "trai", "gia", "me", "mẹ", "cha", "gái", "hàng", "cùng", "cha/mẹ", "anh/em"]);
+      const parts = vi.split(/\s+/);
+      if (parts.length === 0) return vi.trim();
+      const last = parts[parts.length - 1];
+      if (last.includes("/")) return vi.replace(/[,\-:\s]+$/g, "").trim();
+      const isAsciiWord = /^[A-Za-z\-]+$/.test(last);
+      const isEnglishTail = isAsciiWord && (last.includes("-") || last.length >= 7);
+      if (isEnglishTail) {
+        parts.pop();
+        return parts.join(" ").replace(/[,\-:\s]+$/g, "").trim();
       }
-    }
-    
-    // Parse text into vocabulary items
+      if (WHITELIST.has(last.toLowerCase())) return vi.replace(/[,\-:\s]+$/g, "").trim();
+      return vi.replace(/[,\-:\s]+$/g, "").trim();
+    };
+
     const parseVocabularyFromText = (text: string): Array<{ english: string; vietnamese: string; example?: string }> => {
       if (!text || !text.trim()) return [];
-      const lines = text.split(/\r?\n/).map(l => normalize(l)).filter(l => l.length > 0);
-      const items: Array<{ english: string; vietnamese: string; example?: string }> = [];
-      for (let i = 0; i < lines.length; i++) {
-        const en = lines[i];
-        if (!isLikelyEnglishTerm(en)) continue;
-        // find vi in next 1-2 lines
-        let vi = "";
-        let example = "";
-        if (i + 1 < lines.length && hasVietnamese(lines[i + 1])) {
-          vi = lines[i + 1];
-          // optional example in next line (EN long sentence)
-          if (i + 2 < lines.length && isExampleSentence(lines[i + 2])) {
-            example = lines[i + 2];
-            i = i + 2;
-          } else {
-            i = i + 1;
+      const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const blocks: string[] = [];
+      let cur: string | null = null;
+      const isSectionHeading = (l: string) => /^\d+(?:\.\d+)*\.\s+/.test(l);
+      for (const l0 of rawLines) {
+        const l = l0.trim();
+        if (/^\d+\.\s+/.test(l) || isSectionHeading(l)) {
+          if (cur) {
+            blocks.push(cur.trim());
+            cur = null;
           }
-        } else {
           continue;
         }
-        if (en && vi) {
-          items.push({ english: en, vietnamese: vi, example });
+        if (/^[—\-]+$/.test(l)) continue;
+        if (/^•\s+/.test(l) || /^\-\s+/.test(l)) {
+          if (cur) blocks.push(cur.trim());
+          cur = l;
+        } else {
+          if (cur) cur += " " + l;
         }
+      }
+      if (cur) blocks.push(cur.trim());
+
+      const items: Array<{ english: string; vietnamese: string; example?: string }> = [];
+      for (const block0 of blocks) {
+        let b = block0.replace(/^•\s+/, "").replace(/^\-\s+/, "");
+        b = b.replace(/\s+/g, " ").trim();
+        const bNoPho = b.replace(/\/[^/]*\//g, " ").replace(/\s+/g, " ").trim();
+
+        let en = "";
+        let vi = "";
+        const mSlash = b.match(/^([A-Za-z][A-Za-z\- ]+?)\s*\/[^/]*\/\s*:\s*(.+)$/);
+        if (mSlash) {
+          en = mSlash[1].trim();
+          vi = mSlash[2].trim();
+        } else {
+          const idx = b.indexOf(":");
+          if (idx !== -1) {
+            en = b.slice(0, idx).trim();
+            vi = b.slice(idx + 1).trim();
+          } else {
+            const pair = splitInlineByVietnamese(bNoPho);
+            if (pair) {
+              en = pair[0];
+              vi = pair[1];
+            }
+          }
+        }
+
+        en = en.trim();
+        if (!isLikelyEnglishTerm(en)) continue;
+
+        if (vi) {
+          vi = fixVietnameseArtifacts(vi);
+          vi = removeTrailingEnglishTail(vi);
+        }
+
+        if (en && vi) items.push({ english: en, vietnamese: vi, example: "" });
       }
       return items;
     };
-    
-    // If OCR failed or no key, fallback to mock sample parse from title-like structure
+
+    const ocrKey = Deno.env.get("OCR_SPACE_API_KEY") || "helloworld";
+    let ocrText = "";
+
+    try {
+      const { data: blob, error: dlErr } = await supabaseAdmin.storage
+        .from(BUCKET_NAME)
+        .download(image.storagePath);
+      if (dlErr) throw dlErr;
+      if (!blob) throw new Error("Download failed");
+
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      const base64Encode = (bytes: Uint8Array) => {
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        return btoa(binary);
+      };
+
+      const contentType = blob.type || "image/jpeg";
+      const base64Image = `data:${contentType};base64,${base64Encode(buf)}`;
+
+      const form = new FormData();
+      form.append("apikey", ocrKey);
+      form.append("language", "auto");
+      form.append("OCREngine", "2");
+      form.append("base64Image", base64Image);
+
+      const res = await fetch("https://api.ocr.space/parse/image", {
+        method: "POST",
+        body: form,
+      });
+      const json = await res.json();
+      const parsed = json?.ParsedResults?.[0]?.ParsedText;
+      if (parsed && typeof parsed === "string") {
+        ocrText = String(parsed || "").trim();
+      }
+    } catch (_e) {
+      ocrText = "";
+    }
+
     let extracted: Array<{ english: string; vietnamese: string; example?: string }> = [];
-    if (ocrText) {
-      extracted = parseVocabularyFromText(ocrText);
-    }
-    if (extracted.length === 0) {
-      extracted = [
-        { english: 'hello', vietnamese: 'xin chào', example: 'Hello, how are you?' },
-        { english: 'goodbye', vietnamese: 'tạm biệt', example: 'Goodbye, see you later!' },
-      ];
-    }
+    if (ocrText) extracted = parseVocabularyFromText(ocrText);
     
     // Deduplicate against existing vocabulary of this collection
     const vocabIds = await kv.get(`vocabulary:collection:${image.collectionId}`) || [];
@@ -445,7 +578,7 @@ app.post("/make-server-06e2d339/images/:id/extract", async (c) => {
       await kv.set(`collection:${image.collectionId}`, collection);
     }
     
-    return c.json({ savedCount: savedItems.length, items: savedItems, extracted });
+    return c.json({ savedCount: savedItems.length, items: savedItems, extracted, ocrText });
   } catch (error) {
     console.error('Extract vocabulary error:', error);
     return c.json({ error: String(error) }, 500);
@@ -455,7 +588,7 @@ app.post("/make-server-06e2d339/images/:id/extract", async (c) => {
 // ==================== VOCABULARY ROUTES ====================
 
 // Get vocabulary for collection
-app.get("/make-server-06e2d339/vocabulary/:collectionId", async (c) => {
+app.get("/server/vocabulary/:collectionId", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -478,7 +611,7 @@ app.get("/make-server-06e2d339/vocabulary/:collectionId", async (c) => {
 });
 
 // Save vocabulary items
-app.post("/make-server-06e2d339/vocabulary", async (c) => {
+app.post("/server/vocabulary", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -523,7 +656,7 @@ app.post("/make-server-06e2d339/vocabulary", async (c) => {
 });
 
 // Update vocabulary item
-app.put("/make-server-06e2d339/vocabulary/:id", async (c) => {
+app.put("/server/vocabulary/:id", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -557,7 +690,7 @@ app.put("/make-server-06e2d339/vocabulary/:id", async (c) => {
 });
 
 // Delete vocabulary item
-app.delete("/make-server-06e2d339/vocabulary/:id", async (c) => {
+app.delete("/server/vocabulary/:id", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -591,7 +724,7 @@ app.delete("/make-server-06e2d339/vocabulary/:id", async (c) => {
 // ==================== QUIZ ROUTES ====================
 
 // Generate quiz from collection
-app.post("/make-server-06e2d339/quizzes/generate", async (c) => {
+app.post("/server/quizzes/generate", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -687,7 +820,7 @@ app.post("/make-server-06e2d339/quizzes/generate", async (c) => {
 });
 
 // Get quiz by ID
-app.get("/make-server-06e2d339/quizzes/:id", async (c) => {
+app.get("/server/quizzes/:id", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -707,7 +840,7 @@ app.get("/make-server-06e2d339/quizzes/:id", async (c) => {
 });
 
 // Save quiz attempt
-app.post("/make-server-06e2d339/attempts", async (c) => {
+app.post("/server/attempts", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -746,7 +879,7 @@ app.post("/make-server-06e2d339/attempts", async (c) => {
 });
 
 // Get quiz attempt history
-app.get("/make-server-06e2d339/attempts", async (c) => {
+app.get("/server/attempts", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -775,7 +908,7 @@ app.get("/make-server-06e2d339/attempts", async (c) => {
 // ==================== SEED DATA ====================
 
 // Seed sample data for demo
-app.post("/make-server-06e2d339/seed", async (c) => {
+app.post("/server/seed", async (c) => {
   try {
     const user = await getAuthUser(c.req.header('Authorization'));
     if (!user) return c.json({ error: 'Unauthorized' }, 401);

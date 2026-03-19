@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { localStorageAPI } from './localStorage';
 
-const API_BASE = `https://${projectId}.supabase.co/functions/v1/server/make-server-06e2d339`;
+const API_BASE = `https://${projectId}.supabase.co/functions/v1/server`;
 
 // Flag to track if backend is available
 let backendAvailable: boolean | null = null;
@@ -144,6 +144,24 @@ export const collectionsAPI = {
       return { collection };
     }
   },
+
+  update: async (id: string, updates: { name?: string; description?: string }) => {
+    try {
+      const data = await apiRequest(`/collections/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+      });
+      backendAvailable = true;
+      return data;
+    } catch (error) {
+      console.warn('Backend unavailable, using localStorage fallback');
+      backendAvailable = false;
+      localStorageAPI.updateCollection(id, updates as any);
+      const collection = localStorageAPI.getCollectionById(id);
+      if (!collection) throw new Error('Collection not found');
+      return { collection };
+    }
+  },
   
   delete: async (id: string) => {
     try {
@@ -188,12 +206,13 @@ export const imagesAPI = {
   },
   
   extract: async (imageId: string) => {
+    const token = await getAuthToken();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     try {
       const res = await fetch(`${API_BASE}/images/${imageId}/extract`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${publicAnonKey}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${token}` },
         signal: controller.signal,
       });
       const data = await res.json().catch(() => ({}));

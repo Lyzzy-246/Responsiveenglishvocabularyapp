@@ -34,6 +34,16 @@ export function ImageExtraction() {
     if (!imageId) return;
 
     try {
+      if (collectionId) {
+        const draftKey = `ocrDraft:${collectionId}:${imageId}`;
+        const raw = sessionStorage.getItem(draftKey);
+        if (raw) {
+          const draft = JSON.parse(raw);
+          setExtractedItems(draft?.items || []);
+          return;
+        }
+      }
+
       const data = await imagesAPI.extract(imageId);
       setExtractedItems(data.extracted || []);
     } catch (error: any) {
@@ -75,6 +85,9 @@ export function ImageExtraction() {
     try {
       await vocabularyAPI.save(collectionId, validItems);
       toast.success(`Đã lưu ${validItems.length} từ vựng!`);
+      if (imageId) {
+        sessionStorage.removeItem(`ocrDraft:${collectionId}:${imageId}`);
+      }
       navigate(`/collections/${collectionId}`);
     } catch (error: any) {
       console.error('Save vocabulary error:', error);
@@ -86,6 +99,9 @@ export function ImageExtraction() {
 
   const handleCancel = () => {
     if (confirm('Hủy bỏ? Các thay đổi sẽ không được lưu.')) {
+      if (collectionId && imageId) {
+        sessionStorage.removeItem(`ocrDraft:${collectionId}:${imageId}`);
+      }
       navigate(`/collections/${collectionId}`);
     }
   };
