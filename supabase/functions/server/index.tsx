@@ -225,6 +225,36 @@ app.get("/server/collections/:id", async (c) => {
   }
 });
 
+// Update collection
+app.put("/server/collections/:id", async (c) => {
+  try {
+    const user = await getAuthUser(c.req.header('Authorization'));
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const collectionId = c.req.param('id');
+    const collection = await kv.get(`collection:${collectionId}`);
+
+    if (!collection || collection.userId !== user.id) {
+      return c.json({ error: 'Collection not found' }, 404);
+    }
+
+    const updates = await c.req.json();
+    const next = {
+      ...collection,
+      ...(typeof updates?.name === 'string' ? { name: updates.name } : {}),
+      ...(typeof updates?.description === 'string' ? { description: updates.description } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await kv.set(`collection:${collectionId}`, next);
+
+    return c.json({ collection: next });
+  } catch (error) {
+    console.error('Update collection error:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // Delete collection
 app.delete("/server/collections/:id", async (c) => {
   try {

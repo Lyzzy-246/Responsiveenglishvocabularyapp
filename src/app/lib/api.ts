@@ -144,6 +144,24 @@ export const collectionsAPI = {
       return { collection };
     }
   },
+
+  update: async (id: string, updates: { name?: string; description?: string }) => {
+    try {
+      const data = await apiRequest(`/collections/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+      });
+      backendAvailable = true;
+      return data;
+    } catch (error) {
+      console.warn('Backend unavailable, using localStorage fallback');
+      backendAvailable = false;
+      localStorageAPI.updateCollection(id, updates as any);
+      const collection = localStorageAPI.getCollectionById(id);
+      if (!collection) throw new Error('Collection not found');
+      return { collection };
+    }
+  },
   
   delete: async (id: string) => {
     try {

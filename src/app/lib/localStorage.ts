@@ -101,6 +101,15 @@ export const localStorageAPI = {
     collections.push(collection);
     localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(collections));
   },
+
+  updateCollection: (id: string, updates: Partial<Collection>) => {
+    const collections = localStorageAPI.getCollections();
+    const index = collections.findIndex(c => c.id === id);
+    if (index !== -1) {
+      collections[index] = { ...collections[index], ...updates, updatedAt: new Date().toISOString() };
+      localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(collections));
+    }
+  },
   
   deleteCollection: (id: string) => {
     const collections = localStorageAPI.getCollections();
