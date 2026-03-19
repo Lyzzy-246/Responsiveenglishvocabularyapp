@@ -25,6 +25,9 @@ export function CollectionDetail() {
   const [collection, setCollection] = useState<Collection | null>(null);
   const [vocabulary, setVocabulary] = useState<Vocabulary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingCollection, setEditingCollection] = useState(false);
+  const [collectionForm, setCollectionForm] = useState({ name: '', description: '' });
+  const [savingCollection, setSavingCollection] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ english: '', vietnamese: '', example: '' });
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -66,12 +69,52 @@ export function CollectionDetail() {
       ]);
       
       setCollection(collectionData.collection);
+      setCollectionForm({
+        name: collectionData.collection?.name || '',
+        description: collectionData.collection?.description || '',
+      });
       setVocabulary(vocabData.vocabulary || []);
     } catch (error: any) {
       console.error('Load data error:', error);
       toast.error('Không thể tải dữ liệu');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCollectionEditStart = () => {
+    if (!collection) return;
+    setCollectionForm({ name: collection.name || '', description: collection.description || '' });
+    setEditingCollection(true);
+  };
+
+  const handleCollectionEditCancel = () => {
+    if (collection) {
+      setCollectionForm({ name: collection.name || '', description: collection.description || '' });
+    }
+    setEditingCollection(false);
+  };
+
+  const handleCollectionEditSave = async () => {
+    if (!id) return;
+    if (!collectionForm.name.trim()) {
+      toast.error('Vui lòng nhập tên bộ sưu tập');
+      return;
+    }
+    setSavingCollection(true);
+    try {
+      const data = await collectionsAPI.update(id, {
+        name: collectionForm.name.trim(),
+        description: collectionForm.description || '',
+      });
+      setCollection(data.collection);
+      setEditingCollection(false);
+      toast.success('Đã cập nhật bộ sưu tập');
+    } catch (error: any) {
+      console.error('Update collection error:', error);
+      toast.error(error.message || 'Cập nhật thất bại');
+    } finally {
+      setSavingCollection(false);
     }
   };
 
@@ -296,8 +339,56 @@ export function CollectionDetail() {
           </div>
         )}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">{collection.name}</h1>
-          <p className="text-gray-600">{collection.description}</p>
+          {editingCollection ? (
+            <div className="max-w-2xl">
+              <div className="flex items-center gap-2 mb-3">
+                <input
+                  type="text"
+                  value={collectionForm.name}
+                  onChange={(e) => setCollectionForm({ ...collectionForm, name: e.target.value })}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  placeholder="Tên bộ sưu tập"
+                />
+                <button
+                  onClick={handleCollectionEditSave}
+                  disabled={savingCollection}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  Lưu
+                </button>
+                <button
+                  onClick={handleCollectionEditCancel}
+                  disabled={savingCollection}
+                  className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  <X className="w-4 h-4" />
+                  Hủy
+                </button>
+              </div>
+              <textarea
+                value={collectionForm.description}
+                onChange={(e) => setCollectionForm({ ...collectionForm, description: e.target.value })}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none"
+                placeholder="Mô tả (không bắt buộc)"
+              />
+            </div>
+          ) : (
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">{collection.name}</h1>
+                <p className="text-gray-600">{collection.description}</p>
+              </div>
+              <button
+                onClick={handleCollectionEditStart}
+                className="mt-1 px-3 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2"
+              >
+                <Edit2 className="w-4 h-4" />
+                Đổi tên
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-3 mb-8">
