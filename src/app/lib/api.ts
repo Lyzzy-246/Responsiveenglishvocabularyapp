@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { localStorageAPI } from './localStorage';
 
-const API_BASE = `https://${projectId}.supabase.co/functions/v1/server/make-server-06e2d339`;
+const API_BASE = `https://${projectId}.supabase.co/functions/v1/server`;
 
 // Flag to track if backend is available
 let backendAvailable: boolean | null = null;
@@ -188,12 +188,13 @@ export const imagesAPI = {
   },
   
   extract: async (imageId: string) => {
+    const token = await getAuthToken();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     try {
       const res = await fetch(`${API_BASE}/images/${imageId}/extract`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${publicAnonKey}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${token}` },
         signal: controller.signal,
       });
       const data = await res.json().catch(() => ({}));
