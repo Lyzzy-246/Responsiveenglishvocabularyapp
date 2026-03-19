@@ -84,57 +84,35 @@ export function CollectionDetail() {
     addDebug(`File: ${file.name} (${file.type || 'unknown'}, ${file.size}B)`);
     setUploading(true);
     try {
-      addDebug('Backend upload start');
-      const data = await imagesAPI.upload(id!, file);
-      addDebug(`Backend upload ok: imageId=${data?.image?.id || 'unknown'}`);
-      toast.success('Upload thành công! Đang quét và tạo từ vựng...');
-      
-      // Trigger server-side extraction + auto-save
-      addDebug('Backend extract start');
-      const extractRes = await imagesAPI.extract(data.image.id);
-      addDebug(`Backend extract done: savedCount=${extractRes?.savedCount ?? 'n/a'}`);
-      
-      const savedCount = extractRes?.savedCount || 0;
-      if (savedCount > 0) {
-        toast.success(`Đã tạo ${savedCount} từ vựng mới`);
-        // Reload vocabulary list
-        addDebug('Reload vocabulary list');
-        const vocabData = await vocabularyAPI.getByCollection(id!);
-        setVocabulary(vocabData.vocabulary || []);
-      } else {
-        addDebug('Backend extract returned 0 items, go to review page');
-        toast.info('Không trích xuất được từ vựng hoặc độ tin cậy thấp. Vui lòng rà soát thủ công.');
-        navigate(`/collections/${id}/extract/${data.image.id}`);
+      addDebug('Client OCR start');
+      const text = await ocrTextFromImage(file);
+      setRawOcrText(text);
+      addDebug(`Client OCR text length: ${text.length}`);
+
+      const items = parseVocabularyFromText(text);
+      addDebug(`Parsed items: ${items.length}`);
+      const valid = items.filter(it => it.english && it.vietnamese);
+      if (valid.length === 0) {
+        toast.info('Không trích xuất được từ vựng từ ảnh này. Vui lòng thêm thủ công.');
+        return;
       }
+
+      const draftId = crypto.randomUUID();
+      const draftKey = `ocrDraft:${id}:${draftId}`;
+      sessionStorage.setItem(
+        draftKey,
+        JSON.stringify({
+          ocrText: text,
+          items: valid,
+          createdAt: new Date().toISOString(),
+          fileName: file.name,
+        }),
+      );
+      addDebug(`Draft created: ${draftId}`);
+      navigate(`/collections/${id}/extract/${draftId}`);
     } catch (error: any) {
-      if (error.message?.includes('fetch') || error.message?.includes('Failed')) {
-        try {
-          addDebug(`Backend unavailable: ${error?.message || String(error)}`);
-          addDebug('Client OCR start');
-          const text = await ocrTextFromImage(file);
-          setRawOcrText(text);
-          addDebug(`Client OCR text length: ${text.length}`);
-          const items = parseVocabularyFromText(text);
-          addDebug(`Parsed items: ${items.length}`);
-          const valid = items.filter(it => it.english && it.vietnamese);
-          if (valid.length > 0) {
-            addDebug(`Saving ${valid.length} items`);
-            const saveRes = await vocabularyAPI.save(id!, valid);
-            addDebug(`Saved items: ${(saveRes?.items || []).length}`);
-            setVocabulary([...vocabulary, ...(saveRes.items || [])]);
-            toast.success(`Đã tạo ${valid.length} từ vựng mới (OCR cục bộ)`);
-          } else {
-            addDebug('No valid items after parsing');
-            toast.info('Không trích xuất được từ vựng từ ảnh này. Vui lòng thêm thủ công.');
-          }
-        } catch (fallbackErr: any) {
-          addDebug(`Client OCR failed: ${fallbackErr?.message || String(fallbackErr)}`);
-          toast.error('Upload ảnh yêu cầu kết nối backend. Vui lòng thêm từ vựng thủ công.');
-        }
-      } else {
-        addDebug(`Unexpected error: ${error?.message || String(error)}`);
-        toast.error(error.message || 'Upload thất bại');
-      }
+      addDebug(`Client OCR failed: ${error?.message || String(error)}`);
+      toast.error(error.message || 'Không thể quét OCR từ ảnh');
     } finally {
       addDebug('Process end');
       setUploading(false);
