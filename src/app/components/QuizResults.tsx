@@ -6,10 +6,14 @@ import { CheckCircle2, XCircle, Trophy, Home, RotateCcw } from 'lucide-react';
 
 interface Answer {
   questionId: string;
-  english: string;
+  order?: number;
+  prompt?: string;
   correctAnswer: string;
   userAnswer: string;
   isCorrect: boolean;
+  vocabEnglish?: string;
+  vocabVietnamese?: string;
+  vocabExample?: string;
 }
 
 interface LocationState {
@@ -41,6 +45,7 @@ export function QuizResults() {
   }
 
   const { score, correctCount, totalQuestions, answers } = state;
+  const ordered = [...answers].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'text-green-600';
@@ -104,7 +109,7 @@ export function QuizResults() {
           </div>
 
           <div className="divide-y divide-gray-200">
-            {answers.map((answer, index) => (
+            {ordered.map((answer, index) => (
               <div key={answer.questionId} className="p-6">
                 <div className="flex items-start gap-4">
                   <div className="flex-shrink-0">
@@ -119,7 +124,7 @@ export function QuizResults() {
                     <div className="flex items-start justify-between mb-2">
                       <div>
                         <span className="text-sm text-gray-500">Câu {index + 1}</span>
-                        <h3 className="text-lg font-semibold text-gray-900">{answer.english}</h3>
+                        <h3 className="text-lg font-semibold text-gray-900">{answer.prompt || ''}</h3>
                       </div>
                     </div>
 
@@ -143,6 +148,25 @@ export function QuizResults() {
                           Bạn chưa trả lời câu này
                         </div>
                       )}
+
+                      <div className="mt-3 text-sm bg-gray-50 rounded-lg p-3 border border-gray-200">
+                        <div className="font-semibold text-gray-700 mb-2">Thông tin từ vựng</div>
+                        <div className="text-gray-800">
+                          <div>
+                            <span className="text-gray-600">English:</span>{' '}
+                            <span className="font-semibold">{answer.vocabEnglish || '—'}</span>
+                          </div>
+                          <div className="mt-1">
+                            <span className="text-gray-600">Tiếng Việt:</span>{' '}
+                            <span className="font-semibold">{answer.vocabVietnamese || '—'}</span>
+                          </div>
+                          {answer.vocabExample ? (
+                            <div className="mt-1">
+                              <span className="text-gray-600">Ví dụ:</span> <span>{answer.vocabExample}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
