@@ -905,6 +905,54 @@ app.get("/server/attempts", async (c) => {
   }
 });
 
+// Delete a single attempt
+app.delete("/server/attempts/:id", async (c) => {
+  try {
+    const user = await getAuthUser(c.req.header('Authorization'));
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const attemptId = c.req.param('id');
+    const key = attemptId.startsWith('attempt:') ? attemptId : `attempt:${attemptId}`;
+    const attempt = await kv.get(key);
+    if (!attempt || attempt.userId !== user.id) {
+      return c.json({ error: 'Attempt not found' }, 404);
+    }
+
+    await kv.del(key);
+
+    const attemptIds = await kv.get(`attempts:user:${user.id}`) || [];
+    const filtered = attemptIds.filter((k: string) =>
+      k !== key && k !== attemptId && k !== `attempt:${attemptId}`
+    );
+    await kv.set(`attempts:user:${user.id}`, filtered);
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Delete attempt error:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Clear all attempts for user
+app.delete("/server/attempts", async (c) => {
+  try {
+    const user = await getAuthUser(c.req.header('Authorization'));
+    if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+    const attemptIds = await kv.get(`attempts:user:${user.id}`) || [];
+    const keys = attemptIds.map((k: string) => (k.startsWith('attempt:') ? k : `attempt:${k}`));
+    if (keys.length > 0) {
+      await kv.mdel(keys);
+    }
+    await kv.set(`attempts:user:${user.id}`, []);
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Clear attempts error:', error);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // ==================== SEED DATA ====================
 
 // Seed sample data for demo

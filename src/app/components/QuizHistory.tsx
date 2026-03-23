@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { attemptsAPI } from '../lib/api';
 import { toast } from 'sonner';
 import { Header } from './Header';
-import { Trophy, Calendar, BookOpen, TrendingUp } from 'lucide-react';
+import { Trophy, Calendar, BookOpen, TrendingUp, Trash2 } from 'lucide-react';
 
 interface Attempt {
   id: string;
@@ -81,6 +81,30 @@ export function QuizHistory() {
 
   const stats = calculateStats();
 
+  const handleDeleteAttempt = async (attemptId: string) => {
+    if (!confirm('Xóa lịch sử quiz này?')) return;
+    try {
+      await attemptsAPI.delete(attemptId);
+      setAttempts(prev => prev.filter(a => a.id !== attemptId));
+      toast.success('Đã xóa lịch sử');
+    } catch (error: any) {
+      console.error('Delete attempt error:', error);
+      toast.error(error.message || 'Xóa thất bại');
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!confirm('Xóa toàn bộ lịch sử làm quiz?')) return;
+    try {
+      await attemptsAPI.clearAll();
+      setAttempts([]);
+      toast.success('Đã xóa toàn bộ lịch sử');
+    } catch (error: any) {
+      console.error('Clear history error:', error);
+      toast.error(error.message || 'Xóa thất bại');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -99,7 +123,18 @@ export function QuizHistory() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Lịch sử làm Quiz</h1>
-          <p className="text-gray-600">Xem lại kết quả các bài quiz đã làm</p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <p className="text-gray-600">Xem lại kết quả các bài quiz đã làm</p>
+            {attempts.length > 0 ? (
+              <button
+                onClick={handleClearAll}
+                className="px-4 py-2 border border-red-200 text-red-700 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-2 w-fit"
+              >
+                <Trash2 className="w-4 h-4" />
+                Xóa tất cả
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {/* Stats Cards */}
@@ -172,6 +207,9 @@ export function QuizHistory() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Thời gian
                     </th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Hành động
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -202,6 +240,15 @@ export function QuizHistory() {
                             <Calendar className="w-4 h-4" />
                             {new Date(attempt.completedAt || attempt.createdAt || '').toLocaleString('vi-VN')}
                           </div>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            onClick={() => handleDeleteAttempt(attempt.id)}
+                            className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Xóa"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </td>
                       </tr>
                     );
