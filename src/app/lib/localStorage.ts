@@ -205,6 +205,16 @@ export const localStorageAPI = {
     attempts.push(attempt);
     localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
   },
+
+  deleteAttempt: (id: string) => {
+    const attempts = localStorageAPI.getAttempts();
+    const filtered = attempts.filter(a => a.id !== id);
+    localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(filtered));
+  },
+
+  clearAttempts: () => {
+    localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify([]));
+  },
   
   // Seed data
   seedData: (userId: string) => {

@@ -496,6 +496,36 @@ export const attemptsAPI = {
       return { attempts: enrichedAttempts };
     }
   },
+
+  delete: async (attemptId: string) => {
+    try {
+      const data = await apiRequest(`/attempts/${attemptId}`, {
+        method: 'DELETE',
+      });
+      backendAvailable = true;
+      return data;
+    } catch (error) {
+      console.warn('Backend unavailable, using localStorage fallback');
+      backendAvailable = false;
+      localStorageAPI.deleteAttempt(attemptId);
+      return { success: true };
+    }
+  },
+
+  clearAll: async () => {
+    try {
+      const data = await apiRequest('/attempts', {
+        method: 'DELETE',
+      });
+      backendAvailable = true;
+      return data;
+    } catch (error) {
+      console.warn('Backend unavailable, using localStorage fallback');
+      backendAvailable = false;
+      localStorageAPI.clearAttempts();
+      return { success: true };
+    }
+  },
 };
 
 // Seed API
